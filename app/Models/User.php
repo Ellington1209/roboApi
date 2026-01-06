@@ -22,6 +22,7 @@ class User extends Authenticatable
         'tenant_id',
         'name',
         'email',
+        'phone',
         'password',
         'is_super_admin',
     ];

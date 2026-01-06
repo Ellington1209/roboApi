@@ -16,7 +16,7 @@ class AuthController
     public function login(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'email' => 'required|email',
+            'phone' => 'required|string',
             'password' => 'required|string',
         ]);
 
@@ -28,13 +28,13 @@ class AuthController
         }
 
         $result = $this->authService->login(
-            $request->email,
+            $request->phone,
             $request->password
         );
 
         if (!$result) {
             return response()->json([
-                'message' => 'Email ou senha inválidos',
+                'message' => 'Telefone ou senha inválidos',
             ], 401);
         }
 
