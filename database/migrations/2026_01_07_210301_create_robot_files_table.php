@@ -24,11 +24,11 @@ return new class extends Migration
             $table->smallInteger('sort_order')->default(0);
             $table->timestamps();
 
-            // Índices
+            // Índices  
             $table->index('robot_id');
             $table->index(['robot_id', 'file_type']);
             $table->index(['robot_id', 'sort_order']);
-        });
+        }); 
     }
 
     /**
