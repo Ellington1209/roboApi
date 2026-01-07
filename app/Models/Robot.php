@@ -49,6 +49,11 @@ class Robot extends Model
         return $this->hasMany(RobotImage::class)->orderBy('sort_order');
     }
 
+    public function files(): HasMany
+    {
+        return $this->hasMany(RobotFile::class)->orderBy('sort_order');
+    }
+
     public function versions(): HasMany
     {
         return $this->hasMany(RobotVersion::class)->orderBy('version', 'desc');

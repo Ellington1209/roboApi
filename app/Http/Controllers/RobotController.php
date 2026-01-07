@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreRobotRequest;
+use App\Http\Requests\UpdateRobotRequest;
 use App\Models\Robot;
+use App\Models\RobotFile;
 use App\Models\RobotImage;
 use App\Models\RobotParameter;
 use App\Models\RobotVersion;
@@ -10,7 +13,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\URL;
 
 class RobotController
@@ -23,7 +25,7 @@ class RobotController
     {
         $user = $request->user();
 
-        $query = Robot::with(['parameters', 'images', 'user:id,name,email'])
+        $query = Robot::with(['parameters', 'images', 'files', 'user:id,name,email'])
             ->orderBy('created_at', 'desc');
 
         // Se não for super admin, filtra apenas os robôs do usuário
@@ -64,42 +66,8 @@ class RobotController
     /**
      * Cria um novo robô com parâmetros, imagens e versão.
      */
-    public function store(Request $request): JsonResponse
+    public function store(StoreRobotRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:150',
-            'description' => 'nullable|string',
-            'language' => 'required|string|max:20|in:nelogica,python,js,other,meta-traider',
-            'tags' => 'nullable|array',
-            'tags.*' => 'string',
-            'code' => 'required|string',
-            'is_active' => 'nullable|boolean',
-            'parameters' => 'nullable|array',
-            'parameters.*.key' => 'required|string|max:80',
-            'parameters.*.label' => 'required|string|max:120',
-            'parameters.*.type' => 'required|string|max:20|in:number,string,boolean,select',
-            'parameters.*.value' => 'required',
-            'parameters.*.default_value' => 'nullable',
-            'parameters.*.required' => 'nullable|boolean',
-            'parameters.*.options' => 'nullable|array',
-            'parameters.*.validation_rules' => 'nullable|array',
-            'parameters.*.group' => 'nullable|string',
-            'parameters.*.sort_order' => 'nullable|integer',
-            'images' => 'nullable|array',
-            'images.*' => 'image|mimes:jpeg,png,jpg,gif,webp|max:10240', // 10MB max
-            'image_titles' => 'nullable|array',
-            'image_titles.*' => 'nullable|string|max:120',
-            'image_captions' => 'nullable|array',
-            'image_captions.*' => 'nullable|string|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Erro de validação',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
         try {
             DB::beginTransaction();
 
@@ -170,6 +138,33 @@ class RobotController
                 }
             }
 
+            // Upload de arquivos (psf, mq5)
+            if ($request->hasFile('files')) {
+                $files = $request->file('files');
+                $fileNames = $request->file_names ?? [];
+
+                foreach ($files as $index => $file) {
+                    $path = $file->store("robots/{$robot->id}/files", 'public');
+                    $fileUrl = url(Storage::url($path));
+                    
+                    // Determinar o tipo de arquivo pela extensão
+                    $extension = strtolower($file->getClientOriginalExtension());
+                    $fileType = in_array($extension, ['psf', 'mq5']) ? $extension : null;
+
+                    RobotFile::create([
+                        'robot_id' => $robot->id,
+                        'name' => $fileNames[$index] ?? $file->getClientOriginalName(),
+                        'disk' => 'public',
+                        'path' => $path,
+                        'url' => $fileUrl,
+                        'mime_type' => $file->getMimeType(),
+                        'file_type' => $fileType,
+                        'size_bytes' => $file->getSize(),
+                        'sort_order' => $index,
+                    ]);
+                }
+            }
+
             // Criar versão inicial
             RobotVersion::create([
                 'robot_id' => $robot->id,
@@ -183,7 +178,7 @@ class RobotController
             DB::commit();
 
             // Carregar relacionamentos
-            $robot->load(['parameters', 'images', 'user:id,name,email']);
+            $robot->load(['parameters', 'images', 'files', 'user:id,name,email']);
 
             return response()->json([
                 'message' => 'Robô criado com sucesso',
@@ -207,7 +202,7 @@ class RobotController
     {
         $user = $request->user();
 
-        $query = Robot::with(['parameters', 'images', 'versions', 'user:id,name,email']);
+        $query = Robot::with(['parameters', 'images', 'files', 'versions', 'user:id,name,email']);
 
         // Se não for super admin, filtra apenas os robôs do usuário
         if (!$user->is_super_admin) {
@@ -224,7 +219,7 @@ class RobotController
     /**
      * Atualiza um robô existente.
      */
-    public function update(Request $request, string $id): JsonResponse
+    public function update(UpdateRobotRequest $request, string $id): JsonResponse
     {
         $user = $request->user();
 
@@ -234,45 +229,6 @@ class RobotController
         }
 
         $robot = $query->findOrFail($id);
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'sometimes|required|string|max:150',
-            'description' => 'nullable|string',
-            'language' => 'sometimes|required|string|max:20|in:pascal,python,js,other',
-            'tags' => 'nullable|array',
-            'tags.*' => 'string',
-            'code' => 'sometimes|required|string',
-            'is_active' => 'nullable|boolean',
-            'parameters' => 'nullable|array',
-            'parameters.*.id' => 'nullable|exists:robot_parameters,id',
-            'parameters.*.key' => 'required|string|max:80',
-            'parameters.*.label' => 'required|string|max:120',
-            'parameters.*.type' => 'required|string|max:20|in:number,string,boolean,select',
-            'parameters.*.value' => 'required',
-            'parameters.*.default_value' => 'nullable',
-            'parameters.*.required' => 'nullable|boolean',
-            'parameters.*.options' => 'nullable|array',
-            'parameters.*.validation_rules' => 'nullable|array',
-            'parameters.*.group' => 'nullable|string',
-            'parameters.*.sort_order' => 'nullable|integer',
-            'images' => 'nullable|array',
-            'images.*' => 'image|mimes:jpeg,png,jpg,gif,webp|max:10240',
-            'image_titles' => 'nullable|array',
-            'image_titles.*' => 'nullable|string|max:120',
-            'image_captions' => 'nullable|array',
-            'image_captions.*' => 'nullable|string|max:255',
-            'delete_image_ids' => 'nullable|array',
-            'delete_image_ids.*' => 'exists:robot_images,id',
-            'create_version' => 'nullable|boolean', // Se true, cria nova versão ao atualizar código
-            'changelog' => 'nullable|string',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Erro de validação',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
 
         try {
             DB::beginTransaction();
@@ -363,6 +319,18 @@ class RobotController
                 }
             }
 
+            // Deletar arquivos
+            if ($request->has('delete_file_ids')) {
+                $filesToDelete = RobotFile::whereIn('id', $request->delete_file_ids)
+                    ->where('robot_id', $robot->id)
+                    ->get();
+
+                foreach ($filesToDelete as $file) {
+                    Storage::disk($file->disk)->delete($file->path);
+                    $file->delete();
+                }
+            }
+
             // Upload de novas imagens
             if ($request->hasFile('images')) {
                 $images = $request->file('images');
@@ -398,6 +366,35 @@ class RobotController
                 }
             }
 
+            // Upload de novos arquivos (psf, mq5)
+            if ($request->hasFile('files')) {
+                $files = $request->file('files');
+                $fileNames = $request->file_names ?? [];
+                
+                $currentMaxSort = RobotFile::where('robot_id', $robot->id)->max('sort_order') ?? -1;
+
+                foreach ($files as $index => $file) {
+                    $path = $file->store("robots/{$robot->id}/files", 'public');
+                    $fileUrl = url(Storage::url($path));
+                    
+                    // Determinar o tipo de arquivo pela extensão
+                    $extension = strtolower($file->getClientOriginalExtension());
+                    $fileType = in_array($extension, ['psf', 'mq5']) ? $extension : null;
+
+                    RobotFile::create([
+                        'robot_id' => $robot->id,
+                        'name' => $fileNames[$index] ?? $file->getClientOriginalName(),
+                        'disk' => 'public',
+                        'path' => $path,
+                        'url' => $fileUrl,
+                        'mime_type' => $file->getMimeType(),
+                        'file_type' => $fileType,
+                        'size_bytes' => $file->getSize(),
+                        'sort_order' => $currentMaxSort + $index + 1,
+                    ]);
+                }
+            }
+
             // Criar nova versão se solicitado
             if ($shouldCreateVersion) {
                 // Marcar versão anterior como não atual
@@ -416,7 +413,7 @@ class RobotController
 
             DB::commit();
 
-            $robot->load(['parameters', 'images', 'user:id,name,email']);
+            $robot->load(['parameters', 'images', 'files', 'user:id,name,email']);
 
             return response()->json([
                 'message' => 'Robô atualizado com sucesso',
@@ -456,6 +453,11 @@ class RobotController
                 }
             }
 
+            // Deletar arquivos do storage
+            foreach ($robot->files as $file) {
+                Storage::disk($file->disk)->delete($file->path);
+            }
+
             $robot->delete(); // Soft delete
 
             return response()->json([
@@ -468,5 +470,40 @@ class RobotController
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Download de arquivo do robô.
+     */
+    public function downloadFile(Request $request, string $robotId, string $fileId): \Symfony\Component\HttpFoundation\BinaryFileResponse|JsonResponse
+    {
+        $user = $request->user();
+
+        $query = Robot::query();
+        if (!$user->is_super_admin) {
+            $query->where('user_id', $user->id);
+        }
+
+        $robot = $query->findOrFail($robotId);
+
+        $file = RobotFile::where('id', $fileId)
+            ->where('robot_id', $robot->id)
+            ->firstOrFail();
+
+        $filePath = Storage::disk($file->disk)->path($file->path);
+
+        if (!file_exists($filePath)) {
+            return response()->json([
+                'message' => 'Arquivo não encontrado no storage',
+            ], 404);
+        }
+
+        return response()->download(
+            $filePath,
+            $file->name ?? basename($file->path),
+            [
+                'Content-Type' => $file->mime_type ?? 'application/octet-stream',
+            ]
+        );
     }
 }
