@@ -21,11 +21,13 @@ services:
       - "8081:80"
     volumes:
       - .:/var/www
+      - ../roboFront:/var/www/roboFront
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - app
     networks:
       - app-net
+
 
   postgres:
     image: postgres:16
